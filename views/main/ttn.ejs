@@ -1,0 +1,303 @@
+<script src="js/backbone.paginator.js"></script>
+<script src="js/bootstrap-editable.min.js"></script>
+
+<div class="container">
+	<h2 style="margin:30px;">Обработка транспортных накладных</h2>
+	<div class="panel-group" id="accordion" role="tablist" aria-multiselectable="true"></div>
+</div>
+
+<script>
+//<link href="css/bootstrap-editable.css" rel="stylesheet"/>
+	_.templateSettings = {
+		interpolate : /\{\{(.+?)\}\}/g
+	};
+
+	String.prototype.format = function() {
+		var formatted = this;
+		for( var arg in arguments ) {
+			formatted = formatted.replace("{" + arg + "}", arguments[arg]);
+		}
+		return formatted;
+	};
+
+	var TtnModel = Backbone.Model.extend({
+		idAttribute: 'id',
+	});
+
+	var TtnCollection = Backbone.Collection.extend({
+		url: "/ttn/browse",
+
+		initialize: function() {
+			var self = this;
+
+			this.curPage = 1;
+			this.recsPerPage = 20;
+			this.totalRecs = 0;
+
+			io.socket.on("ttn", function (msg) {
+				if (msg.verb == "created") {
+					console.log("Notify: new TTN created");
+					if (self.curPage == 1) {
+						self.refresh();
+					}
+				}
+
+				if (msg.verb == "updated") {
+					console.log("Notify: TTN updated");
+					self.add(msg.data, {merge: true});
+				}
+			});
+
+			io.socket.on('connect', function (msg) {
+				self.refresh();
+			});
+		},
+
+		refresh: function () {
+			this.fetch({data: {page: this.curPage, per_page: this.recsPerPage}});
+		},
+
+		fetch: function(options) {
+			options = options || {};
+			var self = this;
+
+			if (options.reset) {
+				self.reset();
+			}
+
+			io.socket.get(self.url, options.data, function (data) {
+				self.totalRecs = data.total_count;
+				self.set(data.items);
+			});
+		},
+
+	});
+
+	var ttnCollection = new TtnCollection();
+
+	var TtnView = Backbone.View.extend({
+		tagname: 'div',
+		model: TtnModel,
+
+		initialize: function() {
+			this.listenTo(this.model, "change", this.update);
+		},
+
+		template: _.template(
+			'<div id={{ "group" + id }} class="panel panel-default">' +
+			'<div class="panel-heading" role="tab" id={{ "heading" + id }}>' +
+			'		<a id={{ "ttn_header" + id }} role="button" data-toggle="collapse" data-parent="#accordion" href={{ "#collapse" + id }} aria-expanded="false" aria-controls={{ "collapse" + id }}></a>' +
+			'		<img id={{ "inprogress" + id }} src="img/ajax-loader.gif" style="width:30px;height:30px;display:inline-block;">' +
+			'	</div>' +
+			'	<div id="{{ "collapse" + id }}" class="panel-collapse collapse" role="tabpanel" aria-labelledby={{ "heading" + id }}>' +
+			'		<div class="panel-body">' +
+			'			<button id={{ "ttn_accept" + id }} class="btn btn-primary btn-large">Подтвердить</button>' +
+			'			<button id={{ "ttn_reject" + id }} class="btn btn-primary btn-large">Отклонить</button>' +
+			'			<p id={{ "ttn_status" + id }}></p>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">Дата</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-5" id={{ "ttn_date" + id }}></div>' +
+			'			</div>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">Поставщик</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-5" id={{ "ttn_shipper" + id }}></div>' +
+			'			</div>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">Получатель</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-5" id={{ "ttn_consignee" + id }}></div>' +
+			'			</div>' +
+			'			<p>' +
+			'			<p>Позиции ({{ model.positions.length }}):</p>' +
+			'			<p>' +
+			'			<div class="panel-body" id={{ "ttn_positions" + id }}></div>' +
+			'		</div>' +
+			'	</div>' +
+			'</div>'
+		),
+
+		create: function (cont) {
+			var model = this.model;
+			var self = this;
+
+			console.log("create ++++++++++++++++");
+			console.log(model);
+
+			var html = this.template({id: model.cid, model: model.attributes});
+			cont.append(html);
+
+			this.item        = $("#group"         + model.cid);
+			this.header      = $("#ttn_header"    + model.cid);
+			this.inprogress  = $("#inprogress"    + model.cid);
+			this.date        = $("#ttn_date"      + model.cid);
+			this.shipper     = $("#ttn_shipper"   + model.cid);
+			this.consignee   = $("#ttn_consignee" + model.cid);
+			this.positions   = $("#ttn_positions" + model.cid);
+			this.btnAccept   = $("#ttn_accept"    + model.cid);
+			this.btnReject   = $("#ttn_reject"    + model.cid);
+			this.status      = $("#ttn_status"    + model.cid);
+
+			this.btnAccept.button().click(function () {
+				var realQuantities = [];
+				var positions = model.attributes.positions;
+
+				for (var i = 0; i < positions.length; i++) {
+					var position = positions[i];
+					var realQuantity = position.realQuantity;
+					if (realQuantity == undefined) {
+						realQuantity = parseInt(position.quantity);
+					}
+					realQuantities.push(realQuantity);
+				}
+
+				io.socket.post("/ttn/accept", {id: model.id, real_quantities: realQuantities});
+			});
+
+			this.btnReject.button().click(function () {
+				io.socket.post("/ttn/reject", {id: model.id});
+			});
+
+			this.render();
+		},
+
+		update: function () {
+			console.log('update');
+			this.render();
+		},
+
+		remove: function() {
+			var model = this.model;
+			//ontext.destroy("#heading" + model.cid);
+			this.item.remove();
+		},
+
+		render: function () {
+			var model = this.model;
+			var attributes = model.attributes;
+			var self = this;
+
+			console.log("Render:");
+			console.log(model);
+
+			var header = "{0} от {1} {2} (Позиций: {3})".format(attributes.number, attributes.date, attributes.shipper.name, attributes.positions.length);
+			if (attributes.replied == "no") {
+				header += " Новая!";
+			}
+			this.header.html(header);
+
+			if (attributes.replied != "no") {
+				this.btnAccept.hide();
+				this.btnReject.hide();
+
+				this.status.show();
+				if (attributes.replied == "accepted") {
+					this.status.html("ПОДТВЕРЖДЕНА");
+					this.status.css({ 'color': 'green', 'font-size': '150%' });
+				}
+				else if (attributes.replied == "rejected") {
+					this.status.html("ОТКЛОНЕНА");
+					this.status.css({ 'color': 'red', 'font-size': '150%' });
+				}
+			}
+			else {
+				this.btnAccept.show();
+				this.btnReject.show();
+				this.status.hide();
+			}
+
+			if (attributes.requests > 0)
+				this.inprogress.show();
+			else
+				this.inprogress.hide();
+			
+			this.date.html(attributes.date);
+			var shipper = attributes.shipper;
+			this.shipper.html("{0} <p>ИНН: {1} КПП: {2}".format(shipper.fullName, shipper.inn, shipper.kpp));
+			var consignee = attributes.consignee;
+			this.consignee.html("{0} <p>ИНН: {1} КПП: {2}".format(consignee.fullName, consignee.inn, consignee.kpp));
+
+			var positions = attributes.positions;
+			var positions_html = '<table id="ttn_positions_table{0}" class="table table-striped">'.format(model.cid);
+			positions_html += '<thead><tr><th>Наименование</th><th>Количество</th><th>Реальное количество</th><th>Недостача</th></tr></thead>';
+			for (var i = 0; i < positions.length; i++) {
+				var position = positions[i];
+				var diff = position.quantity - position.realQuantity;
+				if (attributes.replied == "no") {
+					positions_html += '<tr><td>{0} ({1})</td><td>{2}</td><td><a id="{3}" href="#">{4}</a></td><td id="{5}" style="color:red">{6}</td></tr>'.format(
+						position.product.name,
+						position.product.capacity,
+						position.quantity,
+						"ttn_position" + model.cid + "_p" + i,
+						position.realQuantity,
+						"ttn_position_diff" + model.cid + "_p" + i,
+						diff > 0 ? diff : ""
+					);
+				}
+				else {
+					positions_html += '<tr><td>{0} ({1})</td><td>{2}</td><td>{3}</td><td id="{4}" style="color:red">{5}</td></tr>'.format(
+						position.product.name,
+						position.product.capacity,
+						position.quantity,
+						position.realQuantity,
+						"ttn_position_diff" + model.cid + "_p" + i,
+						diff > 0 ? diff : ""
+					);
+				}
+			}
+			positions_html += "</table>";
+			this.positions.html(positions_html);
+
+			if (attributes.replied == "no") {
+
+				var setupPosition = function (position, index) {
+					$("#ttn_position" + model.cid + "_p" + index).editable({
+						type: 'number',
+						title: 'Реальное количество',
+						validate: function (value) {
+							if (value > position.quantity) {
+								return "Реальное количество не может быть больше, чем в накладной";
+							}
+						}
+					}).on('save', function(e, params) {
+						position.realQuantity = parseInt(params.newValue);
+						var diff = position.quantity - position.realQuantity;
+						$("#ttn_position_diff" + model.cid + "_p" + index).html(diff > 0 ? diff : "");
+					});
+				};
+
+				for (var i = 0; i < positions.length; i++) {
+					setupPosition(positions[i], i);
+				}
+			}
+		},
+	});
+
+	var TtnListView = Backbone.View.extend({
+		el: '#accordion',
+
+		initialize: function () {
+			this.collection.on('add', this.ttn_add, this);
+			this.collection.on('remove', this.ttn_remove, this);
+		},
+
+		ttn_add: function(model) {
+			console.log("add -------------------");
+			console.log(model);
+			var view = new TtnView({model: model});
+			view.create(this.$el);
+			model.view = view;
+		},
+
+		ttn_remove: function (model) {
+			if (model.view) {
+				model.view.remove();
+				model.view = null;
+			}
+		},
+	});
+	var ttnListView = new TtnListView({collection: ttnCollection});
+
+	//$("#grid").append(grid.render().$el);
+	//$("#paginator").append(paginator.render().$el);
+
+
+</script>

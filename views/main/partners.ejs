@@ -1,0 +1,280 @@
+<div class="container">
+	<h2>Организации</h2>
+	<div id="addPartnerForm">
+			<input id="inn" placeholder="Введите ИНН организации:">
+			<button id="addPartnerButton" class="btn btn-primary btn-large">Добавить</button>
+	</div>
+	<div class="panel-group" id="accordion" role="tablist" aria-multiselectable="true"></div>
+</div>
+
+<script>
+	var PartnerModel = Backbone.Model.extend({
+		urlRoot: '/egaispartner',
+		idAttribute: 'id',
+
+		validate: function (attr) {
+			if (attr.inn == "" || attr.inn == undefined) {
+				return "invalid inn value";
+			}
+		},
+	});
+
+	var PartnerCollection = Backbone.Collection.extend({
+		url: '/egaispartner',
+		model: PartnerModel,
+
+		initialize: function() {
+			var self = this;
+
+			io.socket.get(self.url, function (data) {
+				self.set(data);
+			});
+
+			io.socket.on("egaispartner", function (msg) {
+				if (msg.verb == "created") {
+					self.add(msg.data);
+				}
+
+				if (msg.verb == "updated") {
+					self.add(msg.data, {merge: true});
+				}
+			});
+
+			io.socket.on('connect', function (msg) {
+				io.socket.get(self.url, function (data) {
+					console.log("DATA:");
+					console.log(data);
+					self.set(data);
+				});
+			});
+		},
+
+		sync: function(method, model, options) {
+			console.log("---------------------------");
+		},
+	});
+
+	var partners = new PartnerCollection();
+	partners.fetch();
+
+	_.templateSettings = {
+		interpolate : /\{\{(.+?)\}\}/g
+	};
+
+	var PartnerView = Backbone.View.extend({
+		tagname: 'div',
+		model: PartnerModel,
+
+		initialize: function() {
+			this.listenTo(this.model, "change", this.update);
+		},
+
+		template: _.template(
+			'<div id={{ "group" + id }} class="panel panel-default">' +
+			'<div class="panel-heading" role="tab" id={{ "heading" + id }}>' +
+			'		<a id={{ "partner_header" + id }} role="button" data-toggle="collapse" data-parent="#accordion" href={{ "#collapse" + id }} aria-expanded="false" aria-controls={{ "collapse" + id }}></a>' +
+			'		<img id={{ "inprogress" + id }} src="img/ajax-loader.gif" style="width:30px;height:30px;display:inline-block;">' +
+			'	</div>' +
+			'	<div id="{{ "collapse" + id }}" class="panel-collapse collapse" role="tabpanel" aria-labelledby={{ "heading" + id }}>'+
+			'		<div class="panel-body">' +
+			'			<button id={{ "partnerRefresh" + id }} class="btn btn-primary btn-large">Обновить</button>' +
+			'			<button id={{ "queryAP" + id }} class="btn btn-primary btn-large">Запросить справочник продукции</button>' +
+			'			<button id={{ "cancel" + id }} class="btn btn-primary btn-large">Отменить запросы</button>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">ИНН</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-5" id={{ "partner_inn" + id }}></div>' +
+			'			</div>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">Короткое название</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-8" id={{ "partner_shortName" + id }}></div>' +
+			'			</div>' +
+			'			<div class="row">' +
+			'       <div class="col-md-3 col-sm-3 col-xs-3">Полное название</div>' +
+			'				<div class="col-md-5 col-sm-7 col-xs-8" id={{ "partner_fullName" + id }}></div>' +
+			'			</div>' +
+			'			<a href="/alcoproducts?inn={{ inn }}">Продукция</a>' +
+			'			<p>' +
+			'			<p>Филиалы:</p>' +
+			'			<p>' +
+			'			<div class="panel-body" id={{ "branches" + id }}></div>' +
+			'		</div>' +
+			'	</div>' +
+			'</div>'
+		),
+
+		branch_template: _.template(
+			'<div class="panel panel-default">' +
+			'	<div class="panel-heading" role="tab">' +
+			'		<div style="float:left">{{ data.shortName + "  (КПП " + data.kpp + ")" }}</div><div align="right"><a href="/alcoproducts?kpp={{ data.kpp }}">Продукция</a></div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">КПП</div><div class="col-md-8">{{ data.kpp }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Описание</div><div class="col-md-8">{{ data.description }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Код страны</div><div class="col-md-8">{{ data.country }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Код региона</div><div class="col-md-8">{{ data.region }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Город</div><div class="col-md-8">{{ data.city }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Улица</div><div class="col-md-8">{{ data.street }}</div>' +
+			'	</div>' +
+			'	<div class="row">' +
+			'		<div class="col-md-3">Дом</div><div class="col-md-8">{{ data.house }}</div>' +
+			'	</div>' +
+			'</div>',
+		{variable: 'data'}),
+
+		create: function (cont) {
+			var model = this.model;
+			var self = this;
+
+			var html = this.template({id: model.cid, inn: model.get("inn")});
+			cont.append(html);
+
+			this.item        = $("#group" + model.cid);
+			this.header      = $("#partner_header" + model.cid);
+			this.inn         = $("#partner_inn" + model.cid);
+			this.shortName   = $("#partner_shortName" + model.cid);
+			this.fullName    = $("#partner_fullName" + model.cid);
+			this.branches    = $("#branches" + model.cid);
+			this.inprogress  = $("#inprogress" + model.cid);
+
+			$("#partnerRefresh" + model.cid).button().click(function () {
+				io.socket.post("/partners/refresh", {id: model.id});
+			});
+
+			$("#queryAP" + model.cid).button().click(function () {
+				io.socket.post("/partners/catalog/query", {id: model.id});
+			});
+
+			$("#cancel" + model.cid).button().click(function () {
+				io.socket.post("/partners/calcel", {id: model.id});
+			});
+
+			/*context.attach("#heading" + model.cid, [
+				{
+					text: 'Обновить',
+					action: function (e) {
+						e.preventDefault();
+						io.socket.post("/partners/refresh", {id: model.id});
+					}
+				},
+				{
+					text: 'Запросить справочник продукции',
+					action: function (e) {
+						e.preventDefault();
+						io.socket.post("/partners/catalog/query", {id: model.id});
+					}
+				},
+				{divider: true},
+				{
+					text: 'Отменить запросы',
+					action: function (e) {
+						e.preventDefault();
+						io.socket.post("/partners/calcel", {id: model.id});
+					}
+				},
+				]);*/
+
+			this.render();
+		},
+
+		update: function () {
+			console.log();
+			this.render();
+		},
+
+		remove: function() {
+			var model = this.model;
+			//ontext.destroy("#heading" + model.cid);
+			this.item.remove();
+		},
+
+		render: function () {
+			var model = this.model;
+			var attributes = model.attributes;
+
+			console.log("Render:");
+			console.log(model);
+
+			if (attributes["fullName"] != undefined)
+				this.header.html(attributes["fullName"]);
+			else
+				this.header.html(attributes["inn"]);
+
+			this.inn.html(attributes["inn"]);
+			this.shortName.html(attributes["shortName"]);
+			this.fullName.html(attributes["fullName"]);
+
+			if (attributes["branches"] != undefined) {
+				var branches_html = "";
+				var branches = attributes["branches"];
+
+				for (var i = 0; i < branches.length; i++) {
+					var branch = branches[i];
+					var branch_html = this.branch_template(branch);
+					branches_html += branch_html;
+				}
+
+				this.branches.html(branches_html);
+			}
+
+			if (attributes["requests"] != undefined && attributes["requests"] > 0) {
+				this.inprogress.show();
+			}
+			else {
+				this.inprogress.hide();
+			}
+		},
+	});
+
+	var PartnerListView = Backbone.View.extend({
+		el: '#accordion',
+
+		initialize: function () {
+			this.collection.on('add', this.add_partner, this);
+			this.collection.on('remove', this.remove_partner, this);
+		},
+
+		add_partner: function(model) {
+			var view = new PartnerView({model: model});
+			view.create(this.$el);
+
+			model.view = view;
+		},
+
+		remove_partner: function (model) {
+			model.view.remove();
+			model.view = null;
+		},
+	});
+	var partnerListView = new PartnerListView({collection: partners});
+
+	$("#addPartnerButton").button().click(function(){
+		var innText = $("#inn").val();
+		partners.create({inn: innText}, {wait: true});
+		$("#inn").val("");
+	});
+
+	context.init({
+		fadeSpeed: 100,
+		filter: function ($obj){},
+		above: 'auto',
+		preventDoubleContext: true,
+		compress: false
+	});
+
+	//io.socket.get("/egaispartner", function (data) {
+	//	console.log(data);
+	//});
+
+	//$("#partnerListContainer");
+
+</script>

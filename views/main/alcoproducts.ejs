@@ -1,0 +1,88 @@
+<link rel="stylesheet" href="css/backgrid.css" />
+<link rel="stylesheet" href="css/extensions/paginator/backgrid-paginator.css" />
+<link rel="stylesheet" href="css/extensions/text-cell/backgrid-text-cell.css" />
+
+<div class="container">
+	<h2>Алкогольная продукция <%- args.kpp ? "КПП: " + args.kpp : '' %> <%- args.inn ? "ИНН: " + args.inn : '' %></h2>
+	<div class="panel-group" id="accordion" role="tablist" aria-multiselectable="true"></div>
+
+	<div id="grid"></div>
+	<div id="paginator"></div>
+</div>
+
+<script src="js/backbone.paginator.js"></script>
+<script src="js/backgrid.js"></script>
+<script src="js/extensions/paginator/backgrid-paginator.js"></script>
+<script src="js/extensions/text-cell/backgrid-text-cell.js"></script>
+
+<script>
+	var Issues = Backbone.PageableCollection.extend({
+		url: "/alcoproducts/browse",
+
+		// Initial pagination states
+		state: {
+			pageSize: 20,
+			sortKey: "fullName",
+			order: -1,
+		},
+
+		// You can remap the query parameters from `state` keys from
+		// the default to those your server supports
+		queryParams: {
+			totalPages: null,
+			totalRecords: null,
+			sortKey: "sort",
+			order: "order",
+			kpp: <%= _.has(args, 'kpp') ? args.kpp : null %>,
+			inn: <%= _.has(args, 'inn') ? args.inn : null %>,
+		},
+
+		// get the state from Github's search API result
+		parseState: function (resp, queryParams, state, options) {
+			return {totalRecords: resp.total_count};
+		},
+
+		// get the actual records
+		parseRecords: function (resp, options) {
+			return resp.items;
+		}
+
+	});
+	var issues = new Issues();
+
+	var grid = new Backgrid.Grid({
+		columns: [
+		{
+			name: "fullName",
+			label: "Название",
+			cell: "string",
+			sortable: true,
+			editable: false
+		},
+		{
+			name: "capacity",
+			label: "Объем",
+			cell: "string",
+			sortable: false,
+			editable: false,
+		},
+		{
+			name: "alcVolume",
+			label: "Крепость",
+			cell: "string",
+			sortable: false,
+			editable: false,
+		}],
+		collection: issues
+	});
+
+	var paginator = new Backgrid.Extension.Paginator({
+		collection: issues
+	});
+
+	$("#grid").append(grid.render().$el);
+	$("#paginator").append(paginator.render().$el);
+
+	issues.fetch({reset: true});
+
+</script>
